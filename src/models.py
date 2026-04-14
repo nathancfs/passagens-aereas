@@ -1,0 +1,53 @@
+from datetime import date, datetime
+from pydantic import BaseModel
+
+
+class Route(BaseModel):
+    origin: str
+    destination: str
+    date_from: date
+    date_to: date
+    max_stops: int = 1
+    currency: str = "BRL"
+
+
+class Flight(BaseModel):
+    origin: str
+    destination: str
+    departure_date: date
+    price: float
+    currency: str
+    airline: str
+    stops: int
+    duration_minutes: int
+    deep_link: str
+    source: str  # "kiwi", "google_flights", "secret_flying"
+    fetched_at: datetime = None
+
+    def model_post_init(self, __context):
+        if self.fetched_at is None:
+            self.fetched_at = datetime.utcnow()
+
+
+class PriceRecord(BaseModel):
+    route_key: str          # "GRU-LIS"
+    departure_date: date
+    price: float
+    currency: str
+    source: str
+    deep_link: str
+    recorded_at: datetime = None
+
+    def model_post_init(self, __context):
+        if self.recorded_at is None:
+            self.recorded_at = datetime.utcnow()
+
+
+class Alert(BaseModel):
+    route_key: str
+    departure_date: date
+    new_price: float
+    previous_min: float
+    drop_pct: float
+    deep_link: str
+    source: str

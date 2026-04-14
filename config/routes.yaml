@@ -1,0 +1,19 @@
+monitor:
+  interval_hours: 6        # frequência de checagem
+  lookback_days: 30        # janela de histórico para calcular mínimo
+
+routes:
+  - origin: GRU
+    destination: LIS
+    date_from: 2026-06-01
+    date_to: 2026-06-30
+    max_stops: 1
+    currency: BRL
+
+  # Adicionar mais rotas conforme necessário:
+  # - origin: GRU
+  #   destination: MAD
+  #   date_from: 2026-06-01
+  #   date_to: 2026-06-30
+  #   max_stops: 1
+  #   currency: BRL
