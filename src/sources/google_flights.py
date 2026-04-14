@@ -1,21 +1,29 @@
 """Google Flights via fast-flights — no API key required."""
 
+import time
 from datetime import date, timedelta
 
 from fast_flights import FlightData, Passengers, get_flights
 
 from ..models import Flight, Route
 
+# Sample every N days within the date window — reduces requests per run.
+# At 6h interval: 5-day step = ~6 requests/run instead of 30.
+DATE_STEP_DAYS = 5
+REQUEST_DELAY_SECONDS = 3
+
 
 def fetch(route: Route) -> list[Flight]:
-    """Fetches cheapest flight per day across the route's date window."""
+    """Samples cheapest flights across the route's date window."""
     results: list[Flight] = []
 
     current = route.date_from
     while current <= route.date_to:
         flights = _fetch_date(route, current)
         results.extend(flights)
-        current += timedelta(days=1)
+        current += timedelta(days=DATE_STEP_DAYS)
+        if current <= route.date_to:
+            time.sleep(REQUEST_DELAY_SECONDS)
 
     return results
 
