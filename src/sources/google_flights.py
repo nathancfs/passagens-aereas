@@ -33,21 +33,21 @@ def _fetch_date(route: Route, dep_date: date) -> list[Flight]:
             trip="one-way",
             seat="economy",
             passengers=Passengers(adults=1),
-            fetch_mode="fallback",
+            fetch_mode="common",
         )
     except Exception as exc:
         print(f"[google_flights] error on {dep_date}: {exc}")
         return []
 
     flights = []
-    for f in result.flights[:3]:  # top 3 cheapest per date
+    # Sort by price ascending, take top 3
+    sorted_flights = sorted(
+        result.flights,
+        key=lambda f: _parse_price(str(getattr(f, "price", "0")))
+    )
+    for f in sorted_flights[:3]:
         try:
-            price_raw = getattr(f, "price", None) or getattr(result, "current_price", None)
-            if not price_raw:
-                continue
-
-            # price may come as "R$2,345" or plain int
-            price = _parse_price(str(price_raw))
+            price = _parse_price(str(getattr(f, "price", "0")))
             if price <= 0:
                 continue
 
@@ -59,7 +59,7 @@ def _fetch_date(route: Route, dep_date: date) -> list[Flight]:
                     price=price,
                     currency=route.currency,
                     airline=getattr(f, "name", "?"),
-                    stops=-1,
+                    stops=getattr(f, "stops", -1),
                     duration_minutes=_parse_duration(getattr(f, "duration", "")),
                     deep_link="https://www.google.com/travel/flights",
                     source="google_flights",
