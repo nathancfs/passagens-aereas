@@ -39,6 +39,8 @@ def run_once(alert_fn=None) -> list[Alert]:
             if flight.price <= 0:
                 continue
 
+            prev_min = get_historical_min(route_key, flight.departure_date)
+
             record = PriceRecord(
                 route_key=route_key,
                 departure_date=flight.departure_date,
@@ -48,8 +50,6 @@ def run_once(alert_fn=None) -> list[Alert]:
                 deep_link=flight.deep_link,
             )
             save_record(record)
-
-            prev_min = get_historical_min(route_key, flight.departure_date)
 
             # First record for this route+date — save but don't alert yet
             if prev_min is None:

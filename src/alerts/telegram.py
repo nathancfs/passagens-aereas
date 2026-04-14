@@ -17,7 +17,7 @@ def send(alert: Alert) -> None:
     try:
         resp = httpx.post(
             TELEGRAM_API.format(token=token),
-            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -29,9 +29,9 @@ def send(alert: Alert) -> None:
 def _format(alert: Alert) -> str:
     drop_info = f" (-{alert.drop_pct}% vs mínimo anterior)" if alert.drop_pct > 0 else ""
     return (
-        f"✈️ *Nova mínima: {alert.route_key}*\n"
+        f"✈️ <b>Nova mínima: {alert.route_key}</b>\n"
         f"📅 Partida: {alert.departure_date.strftime('%d/%m/%Y')}\n"
         f"💰 Preço: R$ {alert.new_price:,.0f}{drop_info}\n"
-        f"🔗 [Ver passagem]({alert.deep_link})\n"
-        f"_Fonte: {alert.source}_"
+        f"🔗 <a href=\"{alert.deep_link}\">Ver passagem</a>\n"
+        f"<i>Fonte: {alert.source}</i>"
     )
