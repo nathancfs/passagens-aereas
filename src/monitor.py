@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .models import Alert, Flight, PriceRecord, Route
 from .db import get_historical_min, save_record
-from .sources import amadeus_api, kiwi, secret_flying
+from .sources import google_flights, kiwi, secret_flying
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "routes.yaml"
 
@@ -78,7 +78,7 @@ def run_once(alert_fn=None) -> list[Alert]:
 def _fetch_all(route: Route) -> list[Flight]:
     """Fetches from all sources and deduplicates by (date, price)."""
     flights: list[Flight] = []
-    flights.extend(amadeus_api.fetch(route))
+    flights.extend(google_flights.fetch(route))
     flights.extend(kiwi.fetch(route))
     flights.extend(secret_flying.fetch(route))
 
