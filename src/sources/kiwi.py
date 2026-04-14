@@ -13,6 +13,10 @@ BASE_URL = "https://api.tequila.kiwi.com/v2/search"
 def fetch(route: Route) -> list[Flight]:
     """Fetches cheapest flights per day for the given route and date window."""
     api_key = os.environ.get("KIWI_API_KEY", "")
+    if not api_key:
+        print("[kiwi] KIWI_API_KEY not set — skipping")
+        return []
+
     results: list[Flight] = []
 
     params = {
