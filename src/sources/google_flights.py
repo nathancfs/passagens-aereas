@@ -80,8 +80,8 @@ def _fetch_date(route: Route, dep_date: date) -> list[Flight]:
 
 
 def _build_deep_link(origin: str, destination: str, dep_date: date) -> str:
-    date_str = dep_date.strftime("%Y-%m-%d")
-    return f"https://www.google.com/travel/flights#flt={origin}.{destination}.{date_str};c:BRL;e:1;sd:1;t:f"
+    date_str = dep_date.strftime("%y%m%d")  # Skyscanner format: YYMMDD
+    return f"https://www.skyscanner.com.br/transport/flights/{origin.lower()}/{destination.lower()}/{date_str}/"
 
 
 def _parse_price(raw: str) -> float:
