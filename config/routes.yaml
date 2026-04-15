@@ -1,6 +1,6 @@
 monitor:
   interval_hours: 1        # frequência de checagem
-  lookback_days: 30        # janela de histórico para calcular mínimo
+  lookback_days: 60        # janela de histórico para calcular mínimo
 
 routes: []
   # Rotas estáticas (opcional) — o bot gerencia assinaturas pelo Telegram.
