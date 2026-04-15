@@ -1,4 +1,5 @@
 .env
+.env.*
 data/
 __pycache__/
 *.pyc
@@ -7,3 +8,4 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
+run_dev.bat
