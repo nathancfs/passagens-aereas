@@ -1,19 +1,13 @@
 monitor:
-  interval_hours: 6        # frequência de checagem
+  interval_hours: 1        # frequência de checagem
   lookback_days: 30        # janela de histórico para calcular mínimo
 
-routes:
-  - origin: GRU
-    destination: LIS
-    date_from: 2026-06-01
-    date_to: 2026-06-30
-    max_stops: 1
-    currency: BRL
-
-  # Adicionar mais rotas conforme necessário:
+routes: []
+  # Rotas estáticas (opcional) — o bot gerencia assinaturas pelo Telegram.
+  # Exemplo:
   # - origin: GRU
-  #   destination: MAD
-  #   date_from: 2026-06-01
-  #   date_to: 2026-06-30
+  #   destination: LIS
+  #   date_from: 2026-11-01
+  #   date_to: 2027-01-31
   #   max_stops: 1
   #   currency: BRL

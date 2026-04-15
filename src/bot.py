@@ -578,12 +578,27 @@ async def _ask_trip_type(msg_or_query, dest_name: str, dest_code: str) -> None:
         await msg_or_query.reply_text(text, parse_mode="HTML", reply_markup=kb)
 
 
+def _parse_date_range(text: str) -> tuple[date, date] | None:
+    """Parses 'X a Y' or 'X - Y' into (date_from, date_to). Returns None if not a range."""
+    sep = re.split(r"\s+a\s+|\s*[-–]\s*(?=[a-zA-Z])", text.strip(), maxsplit=1)
+    if len(sep) == 2:
+        d1 = _parse_date(sep[0].strip())
+        d2 = _parse_date(sep[1].strip())
+        if d1 and d2 and d2 >= d1:
+            return d1, d2
+    return None
+
+
+_DATE_HINT = "<i>(ex: nov/2026 a jan/2027 — ou só nov/2026 para data única)</i>"
+_DATE_HINT_SINGLE = "<i>(ex: jan/2027)</i>"
+
+
 async def ask_trip_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     context.user_data["trip_type"] = query.data.split(":")[1]
     await query.edit_message_text(
-        "Quando você quer sair? (data mais cedo)\n<i>(ex: 01/06/2026 ou junho 2026)</i>",
+        f"Janela de datas de <b>saída</b>?\n{_DATE_HINT}",
         parse_mode="HTML",
     )
     return ASK_DATE_FROM
@@ -597,17 +612,39 @@ async def ask_trip_type_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         context.user_data["trip_type"] = "one-way"
     await update.message.reply_text(
-        "Quando você quer sair? (data mais cedo)\n<i>(ex: 01/06/2026 ou junho 2026)</i>",
+        f"Janela de datas de <b>saída</b>?\n{_DATE_HINT}",
         parse_mode="HTML",
     )
     return ASK_DATE_FROM
 
 
 async def ask_date_from(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    d = _parse_date(update.message.text)
+    text = update.message.text
+
+    # Try range first: "nov/26 a jan/27"
+    rng = _parse_date_range(text)
+    if rng:
+        d_from, d_to = rng
+        if d_from < date.today():
+            await update.message.reply_text("A data inicial já passou. Tente datas futuras.")
+            return ASK_DATE_FROM
+        context.user_data["date_from"] = d_from
+        context.user_data["date_to"] = d_to
+        if context.user_data.get("trip_type") == "round-trip":
+            await update.message.reply_text(
+                f"Saída: <b>{d_from.strftime('%d/%m/%Y')} – {d_to.strftime('%d/%m/%Y')}</b>.\n\n"
+                f"Janela de datas de <b>retorno</b>?\n{_DATE_HINT}",
+                parse_mode="HTML",
+            )
+            return ASK_RETURN_FROM
+        await _ask_stops(update.message)
+        return ASK_STOPS
+
+    # Single date
+    d = _parse_date(text)
     if d is None:
         await update.message.reply_text(
-            "Não entendi. Tente: <i>01/06/2026</i> ou <i>junho 2026</i>",
+            f"Não entendi. Tente: <i>nov/2026 a jan/2027</i> ou <i>nov/2026</i>",
             parse_mode="HTML",
         )
         return ASK_DATE_FROM
@@ -616,9 +653,8 @@ async def ask_date_from(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return ASK_DATE_FROM
     context.user_data["date_from"] = d
     await update.message.reply_text(
-        f"Saída mais cedo: <b>{d.strftime('%d/%m/%Y')}</b>.\n\n"
-        "Saída mais tarde (última data que aceita)?\n"
-        "<i>(ex: 30/06/2026)</i>",
+        f"Saída a partir de <b>{d.strftime('%d/%m/%Y')}</b>.\n\n"
+        f"Até qual data de saída?\n{_DATE_HINT_SINGLE}",
         parse_mode="HTML",
     )
     return ASK_DATE_TO
@@ -628,7 +664,7 @@ async def ask_date_to(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     d = _parse_date(update.message.text)
     if d is None:
         await update.message.reply_text(
-            "Não entendi. Tente: <i>30/06/2026</i>", parse_mode="HTML"
+            f"Não entendi. Tente: {_DATE_HINT_SINGLE}", parse_mode="HTML"
         )
         return ASK_DATE_TO
     if d < context.user_data["date_from"]:
@@ -638,7 +674,7 @@ async def ask_date_to(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     if context.user_data.get("trip_type") == "round-trip":
         await update.message.reply_text(
-            "A partir de qual data de <b>retorno</b>?\n<i>(ex: 15/07/2026)</i>",
+            f"Janela de datas de <b>retorno</b>?\n{_DATE_HINT}",
             parse_mode="HTML",
         )
         return ASK_RETURN_FROM
@@ -648,19 +684,35 @@ async def ask_date_to(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def ask_return_from(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    d = _parse_date(update.message.text)
+    text = update.message.text
+
+    # Try range first
+    rng = _parse_date_range(text)
+    if rng:
+        d_from, d_to = rng
+        if d_from < context.user_data["date_to"]:
+            await update.message.reply_text("O retorno deve ser depois da data de saída.")
+            return ASK_RETURN_FROM
+        context.user_data["return_date_from"] = d_from
+        context.user_data["return_date_to"] = d_to
+        await _ask_stops(update.message)
+        return ASK_STOPS
+
+    # Single date
+    d = _parse_date(text)
     if d is None:
         await update.message.reply_text(
-            "Não entendi. Tente: <i>15/07/2026</i>", parse_mode="HTML"
+            f"Não entendi. Tente: <i>jan/2027 a fev/2027</i> ou <i>jan/2027</i>",
+            parse_mode="HTML",
         )
         return ASK_RETURN_FROM
     if d < context.user_data["date_to"]:
-        await update.message.reply_text("A data de retorno deve ser depois da data de saída final.")
+        await update.message.reply_text("A data de retorno deve ser depois da data de saída.")
         return ASK_RETURN_FROM
     context.user_data["return_date_from"] = d
     await update.message.reply_text(
-        f"Retorno a partir de <b>{d.strftime('%d/%m/%Y')}</b>.\n\nAté qual data de retorno?\n"
-        "<i>(ex: 31/07/2026)</i>",
+        f"Retorno a partir de <b>{d.strftime('%d/%m/%Y')}</b>.\n\n"
+        f"Até qual data de retorno?\n{_DATE_HINT_SINGLE}",
         parse_mode="HTML",
     )
     return ASK_RETURN_TO
@@ -670,7 +722,7 @@ async def ask_return_to(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     d = _parse_date(update.message.text)
     if d is None:
         await update.message.reply_text(
-            "Não entendi. Tente: <i>31/07/2026</i>", parse_mode="HTML"
+            f"Não entendi. Tente: {_DATE_HINT_SINGLE}", parse_mode="HTML"
         )
         return ASK_RETURN_TO
     if d < context.user_data["return_date_from"]:
