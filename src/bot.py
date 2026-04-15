@@ -15,7 +15,7 @@ from telegram.ext import (
 )
 
 from .db import delete_subscription, get_subscriptions, save_subscription
-from .models import Route, Subscription
+from .models import Route, Subscription, AIRPORTS_BY_COUNTRY, is_country_code, expand_country_to_airports
 from .sources import google_flights
 
 # ── States ─────────────────────────────────────────────────────────────────────
@@ -25,16 +25,56 @@ from .sources import google_flights
     ASK_ORIGIN, CHOOSE_ORIGIN,
     ASK_DEST, CHOOSE_DEST,
     ASK_TRIP_TYPE,
+    ASK_DATE_MODE_DEP,
     ASK_DATE_FROM, ASK_DATE_TO,
+    ASK_DATE_MODE_RET,
     ASK_RETURN_FROM, ASK_RETURN_TO,
     ASK_STOPS,
     CONFIRM_SUB,
-) = range(12)
+) = range(14)
 
 # ── Airport map ────────────────────────────────────────────────────────────────
 
 AIRPORT_MAP: dict[str, list[tuple[str, str]]] = {
-    # Brazil
+    # Countries (expand to all airports)
+    "br":             [("BR", "🇧🇷 Brasil (todos os aeroportos)")],
+    "brasil":         [("BR", "🇧🇷 Brasil (todos os aeroportos)")],
+    "argentina":      [("AR", "🇦🇷 Argentina (todos os aeroportos)")],
+    "uruguai":        [("UY", "🇺🇾 Uruguai (todos os aeroportos)")],
+    "chile":          [("CL", "🇨🇱 Chile (todos os aeroportos)")],
+    "colombia":       [("CO", "🇨🇴 Colômbia (todos os aeroportos)")],
+    "peru":           [("PE", "🇵🇪 Peru (todos os aeroportos)")],
+    "italia":         [("IT", "🇮🇹 Itália (todos os aeroportos)")],
+    "italy":          [("IT", "🇮🇹 Itália (todos os aeroportos)")],
+    "espanha":        [("ES", "🇪🇸 Espanha (todos os aeroportos)")],
+    "spain":          [("ES", "🇪🇸 Espanha (todos os aeroportos)")],
+    "portugal":       [("PT", "🇵🇹 Portugal (todos os aeroportos)")],
+    "franca":         [("FR", "🇫🇷 França (todos os aeroportos)")],
+    "france":         [("FR", "🇫🇷 França (todos os aeroportos)")],
+    "alemanha":       [("DE", "🇩🇪 Alemanha (todos os aeroportos)")],
+    "germany":        [("DE", "🇩🇪 Alemanha (todos os aeroportos)")],
+    "uk":             [("UK", "🇬🇧 Reino Unido (todos os aeroportos)")],
+    "reino unido":    [("UK", "🇬🇧 Reino Unido (todos os aeroportos)")],
+    "holanda":        [("NL", "🇳🇱 Holanda (todos os aeroportos)")],
+    "netherlands":     [("NL", "🇳🇱 Holanda (todos os aeroportos)")],
+    "suica":           [("CH", "🇨🇭 Suíça (todos os aeroportos)")],
+    "switzerland":    [("CH", "🇨🇭 Suíça (todos os aeroportos)")],
+    "austria":        [("AT", "🇦🇹 Áustria (todos os aeroportos)")],
+    "belgica":        [("BE", "🇧🇪 Bélgica (todos os aeroportos)")],
+    "belgium":        [("BE", "🇧🇪 Bélgica (todos os aeroportos)")],
+    "grecia":         [("GR", "🇬🇷 Grécia (todos os aeroportos)")],
+    "greece":         [("GR", "🇬🇷 Grécia (todos os aeroportos)")],
+    "eua":             [("US", "🇺🇸 EUA (todos os aeroportos)")],
+    "usa":            [("US", "🇺🇸 EUA (todos os aeroportos)")],
+    "estados unidos": [("US", "🇺🇸 EUA (todos os aeroportos)")],
+    "canada":         [("CA", "🇨🇦 Canadá (todos os aeroportos)")],
+    "mexico":         [("MX", "🇲🇽 México (todos os aeroportos)")],
+    "japao":          [("JP", "🇯🇵 Japão (todos os aeroportos)")],
+    "japan":          [("JP", "🇯🇵 Japão (todos os aeroportos)")],
+    "australia":      [("AU", "🇦🇺 Austrália (todos os aeroportos)")],
+    "nova zelandia":  [("NZ", "🇳🇿 Nova Zelândia (todos os aeroportos)")],
+    "new zealand":    [("NZ", "🇳🇿 Nova Zelândia (todos os aeroportos)")],
+    # Brazil cities
     "sao paulo":      [("GRU", "São Paulo/Guarulhos"), ("CGH", "São Paulo/Congonhas")],
     "sp":             [("GRU", "São Paulo/Guarulhos")],
     "guarulhos":      [("GRU", "São Paulo/Guarulhos")],
@@ -81,10 +121,8 @@ AIRPORT_MAP: dict[str, list[tuple[str, str]]] = {
     # Europe
     "lisboa":         [("LIS", "Lisboa")],
     "lisbon":         [("LIS", "Lisboa")],
-    "portugal":       [("LIS", "Lisboa")],
     "lis":            [("LIS", "Lisboa")],
     "paris":          [("CDG", "Paris/CDG"), ("ORY", "Paris/Orly")],
-    "franca":         [("CDG", "Paris/CDG")],
     "cdg":            [("CDG", "Paris/CDG")],
     "ory":            [("ORY", "Paris/Orly")],
     "london":         [("LHR", "Londres/Heathrow"), ("LGW", "Londres/Gatwick"), ("STN", "Londres/Stansted")],
@@ -94,31 +132,25 @@ AIRPORT_MAP: dict[str, list[tuple[str, str]]] = {
     "stn":            [("STN", "Londres/Stansted")],
     "roma":           [("FCO", "Roma/Fiumicino")],
     "rome":           [("FCO", "Roma/Fiumicino")],
-    "italia":         [("FCO", "Roma/Fiumicino"), ("MXP", "Milão/Malpensa")],
-    "italy":          [("FCO", "Roma/Fiumicino"), ("MXP", "Milão/Malpensa")],
     "fco":            [("FCO", "Roma/Fiumicino")],
     "milao":          [("MXP", "Milão/Malpensa"), ("LIN", "Milão/Linate")],
     "milan":          [("MXP", "Milão/Malpensa"), ("LIN", "Milão/Linate")],
     "mxp":            [("MXP", "Milão/Malpensa")],
     "lin":            [("LIN", "Milão/Linate")],
     "madrid":         [("MAD", "Madri")],
-    "espanha":        [("MAD", "Madri")],
     "mad":            [("MAD", "Madri")],
     "barcelona":      [("BCN", "Barcelona")],
     "bcn":            [("BCN", "Barcelona")],
     "amsterdam":      [("AMS", "Amsterdam")],
     "amsterda":       [("AMS", "Amsterdam")],
-    "holanda":        [("AMS", "Amsterdam")],
     "ams":            [("AMS", "Amsterdam")],
     "frankfurt":      [("FRA", "Frankfurt")],
-    "alemanha":       [("FRA", "Frankfurt"), ("MUC", "Munique")],
     "fra":            [("FRA", "Frankfurt")],
     "munique":        [("MUC", "Munique")],
     "munich":         [("MUC", "Munique")],
     "muc":            [("MUC", "Munique")],
     "zurique":        [("ZRH", "Zurique")],
     "zurich":         [("ZRH", "Zurique")],
-    "suica":          [("ZRH", "Zurique")],
     "zrh":            [("ZRH", "Zurique")],
     "genebra":        [("GVA", "Genebra")],
     "geneva":         [("GVA", "Genebra")],
@@ -127,10 +159,8 @@ AIRPORT_MAP: dict[str, list[tuple[str, str]]] = {
     "irlanda":        [("DUB", "Dublin")],
     "dub":            [("DUB", "Dublin")],
     "atenas":         [("ATH", "Atenas")],
-    "grecia":         [("ATH", "Atenas")],
     "ath":            [("ATH", "Atenas")],
     "viena":          [("VIE", "Viena")],
-    "austria":        [("VIE", "Viena")],
     "vie":            [("VIE", "Viena")],
     "praga":          [("PRG", "Praga")],
     "republica tcheca":[("PRG", "Praga")],
@@ -151,7 +181,6 @@ AIRPORT_MAP: dict[str, list[tuple[str, str]]] = {
     "finlandia":      [("HEL", "Helsinki")],
     "hel":            [("HEL", "Helsinki")],
     "bruxelas":       [("BRU", "Bruxelas")],
-    "belgica":        [("BRU", "Bruxelas")],
     "bru":            [("BRU", "Bruxelas")],
     # Americas
     "miami":          [("MIA", "Miami")],
@@ -172,19 +201,14 @@ AIRPORT_MAP: dict[str, list[tuple[str, str]]] = {
     "yyz":            [("YYZ", "Toronto")],
     "cancun":         [("CUN", "Cancún")],
     "cun":            [("CUN", "Cancún")],
-    "mexico":         [("MEX", "Cidade do México")],
     "mex":            [("MEX", "Cidade do México")],
     "buenos aires":   [("EZE", "Buenos Aires/Ezeiza"), ("AEP", "Buenos Aires/Aeroparque")],
-    "argentina":      [("EZE", "Buenos Aires/Ezeiza")],
     "eze":            [("EZE", "Buenos Aires/Ezeiza")],
     "santiago":       [("SCL", "Santiago")],
-    "chile":          [("SCL", "Santiago")],
     "scl":            [("SCL", "Santiago")],
     "lima":           [("LIM", "Lima")],
-    "peru":           [("LIM", "Lima")],
     "lim":            [("LIM", "Lima")],
     "bogota":         [("BOG", "Bogotá")],
-    "colombia":       [("BOG", "Bogotá")],
     "bog":            [("BOG", "Bogotá")],
     # Asia / Middle East / Africa / Oceania
     "dubai":          [("DXB", "Dubai")],
@@ -196,7 +220,6 @@ AIRPORT_MAP: dict[str, list[tuple[str, str]]] = {
     "doh":            [("DOH", "Doha")],
     "tokyo":          [("NRT", "Tóquio/Narita"), ("HND", "Tóquio/Haneda")],
     "toquio":         [("NRT", "Tóquio/Narita"), ("HND", "Tóquio/Haneda")],
-    "japao":          [("NRT", "Tóquio/Narita"), ("HND", "Tóquio/Haneda")],
     "nrt":            [("NRT", "Tóquio/Narita")],
     "hnd":            [("HND", "Tóquio/Haneda")],
     "osaka":          [("KIX", "Osaka/Kansai")],
@@ -233,12 +256,10 @@ AIRPORT_MAP: dict[str, list[tuple[str, str]]] = {
     "egito":          [("CAI", "Cairo")],
     "cai":            [("CAI", "Cairo")],
     "sydney":         [("SYD", "Sydney")],
-    "australia":      [("SYD", "Sydney"), ("MEL", "Melbourne")],
     "syd":            [("SYD", "Sydney")],
     "melbourne":      [("MEL", "Melbourne")],
     "mel":            [("MEL", "Melbourne")],
     "auckland":       [("AKL", "Auckland")],
-    "nova zelandia":  [("AKL", "Auckland")],
     "akl":            [("AKL", "Auckland")],
 }
 
@@ -257,15 +278,29 @@ def _normalize(text: str) -> str:
 
 def infer_airports(text: str) -> list[tuple[str, str]]:
     n = _normalize(text)
+
+    # IATA code (3 letters)
     if re.match(r"^[a-z]{3}$", n):
         iata = n.upper()
         for opts in AIRPORT_MAP.values():
             for code, name in opts:
                 if code == iata:
                     return [(code, name)]
+        # Not found as IATA — could be a city name (e.g. "rio" → GIG+SDU)
+        if n in AIRPORT_MAP:
+            return AIRPORT_MAP[n]
         return [(iata, iata)]
+
+    # City/country name in map (includes "brasil" → BR, "italia" → IT, "br" → BR)
     if n in AIRPORT_MAP:
         return AIRPORT_MAP[n]
+
+    # Country code typed directly (e.g. "IT") — fallback, expands to individual airports
+    if is_country_code(n.upper()):
+        country = n.upper()
+        return [(code, f"{code} ({country})") for code in AIRPORTS_BY_COUNTRY[country]]
+
+    # Fuzzy match
     seen: set[str] = set()
     matches: list[tuple[str, str]] = []
     for key, opts in AIRPORT_MAP.items():
@@ -277,11 +312,83 @@ def infer_airports(text: str) -> list[tuple[str, str]]:
     return matches
 
 
-def _airport_kb(airports: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+_FALLBACK_AIRPORT_NAMES: dict[str, str] = {
+    # City aggregate codes (Google Flights)
+    "MIL": "Milão (todos)",
+    "LON": "Londres (todos)",
+    "NYC": "Nova York (todos)",
+    "PAR": "Paris (todos)",
+    "TYO": "Tóquio (todos)",
+    "OSA": "Osaka (todos)",
+    "BUE": "Buenos Aires (todos)",
+    "CHI": "Chicago (todos)",
+    # South America
+    "COR": "Córdoba",
+    "MVD": "Montevidéu/Carrasco",
+    "MDE": "Medellín",
+    # Italy
+    "VCE": "Veneza/Marco Polo",
+    "NAP": "Nápoles/Capodichino",
+    "FLR": "Florença/Peretola",
+    "BLQ": "Bolonha",
+    # Spain
+    "AGP": "Málaga/Costa del Sol",
+    "SVQ": "Sevilha",
+    "VLC": "Valência",
+    # Portugal
+    "OPO": "Porto",
+    "FAO": "Faro",
+    # France
+    "NCE": "Nice/Côte d'Azur",
+    "LYS": "Lyon",
+    "MRS": "Marselha",
+    # Germany
+    "BER": "Berlim",
+    "DUS": "Düsseldorf",
+    "HAM": "Hamburgo",
+    # UK
+    "MAN": "Manchester",
+    "EDI": "Edimburgo",
+    # USA
+    "ATL": "Atlanta",
+    "BOS": "Boston",
+    # Canada
+    "YVR": "Vancouver",
+    "YUL": "Montreal",
+    # Asia
+    "CAN": "Guangzhou",
+    # Australia
+    "BNE": "Brisbane",
+}
+
+
+def _airport_name(iata: str) -> str:
+    """Look up display name for an IATA code in AIRPORT_MAP."""
+    for opts in AIRPORT_MAP.values():
+        for code, name in opts:
+            if code == iata:
+                return name
+    return _FALLBACK_AIRPORT_NAMES.get(iata, iata)
+
+
+def _airport_kb(airports: list[tuple[str, str]], todos_code: str | None = None) -> InlineKeyboardMarkup:
+    """
+    todos_code: if set, overrides the 'Todos' button callback code.
+                Use a country code (e.g. 'IT') so the monitor handles expansion,
+                instead of creating one subscription per airport.
+    """
     buttons = [
         [InlineKeyboardButton(f"{code} — {name}", callback_data=f"ap:{code}:{name[:28]}")]
         for code, name in airports[:5]
     ]
+    if todos_code or len(airports) > 1:
+        if todos_code:
+            all_codes = todos_code
+            btn_text = "✈️ Todos os aeroportos"
+        else:
+            all_codes = "|".join(code for code, _ in airports[:5])
+            btn_text = "Todos — " + " + ".join(code for code, _ in airports[:5])
+        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"ap:all:{all_codes}")])
     buttons.append([InlineKeyboardButton("✏️ Digitar outro", callback_data="ap:other")])
     return InlineKeyboardMarkup(buttons)
 
@@ -502,7 +609,15 @@ async def ask_origin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ASK_ORIGIN
     if len(airports) == 1:
         code, name = airports[0]
+        if is_country_code(code):
+            airport_options = [(c, _airport_name(c)) for c in AIRPORTS_BY_COUNTRY[code]]
+            await update.message.reply_text(
+                f"Aeroportos de {name}. Qual deseja monitorar?",
+                reply_markup=_airport_kb(airport_options, todos_code=code),
+            )
+            return CHOOSE_ORIGIN
         context.user_data["origin"] = code
+        context.user_data.pop("origin_all", None)
         await update.message.reply_text(
             f"Saindo de <b>{name} ({code})</b>.\n\nPara onde vai?\n"
             "<i>(ex: Lisboa, Itália, Paris, Miami)</i>",
@@ -522,8 +637,27 @@ async def choose_origin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if query.data == "ap:other":
         await query.edit_message_text("Tente outro nome ou código IATA:")
         return ASK_ORIGIN
+    if query.data.startswith("ap:all:"):
+        raw = query.data[len("ap:all:"):]
+        if is_country_code(raw):
+            # Country code — single subscription, monitor expands to airports
+            context.user_data["origin"] = raw
+            context.user_data.pop("origin_all", None)
+            label = raw
+        else:
+            codes = raw.split("|")
+            context.user_data["origin"] = codes[0]
+            context.user_data["origin_all"] = codes
+            label = " + ".join(codes)
+        await query.edit_message_text(
+            f"Saindo de <b>{label}</b>.\n\nPara onde vai?\n"
+            "<i>(ex: Lisboa, Itália, Paris, Miami)</i>",
+            parse_mode="HTML",
+        )
+        return ASK_DEST
     _, code, name = query.data.split(":", 2)
     context.user_data["origin"] = code
+    context.user_data.pop("origin_all", None)
     await query.edit_message_text(
         f"Saindo de <b>{name} ({code})</b>.\n\nPara onde vai?\n"
         "<i>(ex: Lisboa, Itália, Paris, Miami)</i>",
@@ -541,7 +675,15 @@ async def ask_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ASK_DEST
     if len(airports) == 1:
         code, name = airports[0]
+        if is_country_code(code):
+            airport_options = [(c, _airport_name(c)) for c in AIRPORTS_BY_COUNTRY[code]]
+            await update.message.reply_text(
+                f"Aeroportos de {name}. Qual deseja monitorar?",
+                reply_markup=_airport_kb(airport_options, todos_code=code),
+            )
+            return CHOOSE_DEST
         context.user_data["destination"] = code
+        context.user_data.pop("dest_all", None)
         await _ask_trip_type(update.message, name, code)
         return ASK_TRIP_TYPE
     await update.message.reply_text(
@@ -557,8 +699,23 @@ async def choose_dest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if query.data == "ap:other":
         await query.edit_message_text("Tente outro destino:")
         return ASK_DEST
+    if query.data.startswith("ap:all:"):
+        raw = query.data[len("ap:all:"):]
+        if is_country_code(raw):
+            # Country code — single subscription, monitor expands to airports
+            context.user_data["destination"] = raw
+            context.user_data.pop("dest_all", None)
+            label = raw
+        else:
+            codes = raw.split("|")
+            context.user_data["destination"] = codes[0]
+            context.user_data["dest_all"] = codes
+            label = " + ".join(codes)
+        await _ask_trip_type(query, label, "")
+        return ASK_TRIP_TYPE
     _, code, name = query.data.split(":", 2)
     context.user_data["destination"] = code
+    context.user_data.pop("dest_all", None)
     await _ask_trip_type(query, name, code)
     return ASK_TRIP_TYPE
 
@@ -568,8 +725,9 @@ async def _ask_trip_type(msg_or_query, dest_name: str, dest_code: str) -> None:
         InlineKeyboardButton("✈️ Só ida", callback_data="trip:one-way"),
         InlineKeyboardButton("🔄 Ida e volta", callback_data="trip:round-trip"),
     ]])
+    dest_label = f"{dest_name} ({dest_code})" if dest_code else dest_name
     text = (
-        f"Destino: <b>{dest_name} ({dest_code})</b>.\n\n"
+        f"Destino: <b>{dest_label}</b>.\n\n"
         "Tipo de viagem?"
     )
     if hasattr(msg_or_query, "edit_message_text"):
@@ -579,8 +737,8 @@ async def _ask_trip_type(msg_or_query, dest_name: str, dest_code: str) -> None:
 
 
 def _parse_date_range(text: str) -> tuple[date, date] | None:
-    """Parses 'X a Y' or 'X - Y' into (date_from, date_to). Returns None if not a range."""
-    sep = re.split(r"\s+a\s+|\s*[-–]\s*(?=[a-zA-Z])", text.strip(), maxsplit=1)
+    """Parses 'X a Y' or 'X - Y' (spaces required around dash) into (date_from, date_to)."""
+    sep = re.split(r"\s+a\s+|\s+-\s+|\s+–\s+", text.strip(), maxsplit=1)
     if len(sep) == 2:
         d1 = _parse_date(sep[0].strip())
         d2 = _parse_date(sep[1].strip())
@@ -589,19 +747,29 @@ def _parse_date_range(text: str) -> tuple[date, date] | None:
     return None
 
 
-_DATE_HINT = "<i>(ex: nov/2026 a jan/2027 — ou só nov/2026 para data única)</i>"
-_DATE_HINT_SINGLE = "<i>(ex: jan/2027)</i>"
+_DATE_HINT_EXACT = "<i>(ex: 12/12/26 ou 12/12/2026)</i>"
+_DATE_HINT_RANGE = "<i>(ex: 12/12/26 a 15/01/27)</i>"
+_DATE_HINT_RANGE_END = "<i>(ex: 15/01/27)</i>"
+
+
+async def _ask_date_mode(msg_or_query, label: str) -> None:
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("📅 Data específica", callback_data=f"datemode:{label}:exact"),
+        InlineKeyboardButton("📆 Período flexível", callback_data=f"datemode:{label}:range"),
+    ]])
+    text = f"Datas de <b>{label}</b> — data fixa ou período?"
+    if hasattr(msg_or_query, "edit_message_text"):
+        await msg_or_query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+    else:
+        await msg_or_query.reply_text(text, parse_mode="HTML", reply_markup=kb)
 
 
 async def ask_trip_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     context.user_data["trip_type"] = query.data.split(":")[1]
-    await query.edit_message_text(
-        f"Janela de datas de <b>saída</b>?\n{_DATE_HINT}",
-        parse_mode="HTML",
-    )
-    return ASK_DATE_FROM
+    await _ask_date_mode(query, "partida")
+    return ASK_DATE_MODE_DEP
 
 
 async def ask_trip_type_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -611,17 +779,49 @@ async def ask_trip_type_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["trip_type"] = "round-trip"
     else:
         context.user_data["trip_type"] = "one-way"
-    await update.message.reply_text(
-        f"Janela de datas de <b>saída</b>?\n{_DATE_HINT}",
-        parse_mode="HTML",
-    )
+    await _ask_date_mode(update.message, "partida")
+    return ASK_DATE_MODE_DEP
+
+
+async def handle_date_mode_dep(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    mode = query.data.split(":")[-1]  # "exact" or "range"
+    context.user_data["date_mode"] = mode
+    if mode == "exact":
+        await query.edit_message_text(
+            f"Qual a data de <b>partida</b>?\n{_DATE_HINT_EXACT}", parse_mode="HTML"
+        )
+    else:
+        await query.edit_message_text(
+            f"Período de <b>partida</b>?\n{_DATE_HINT_RANGE}", parse_mode="HTML"
+        )
     return ASK_DATE_FROM
 
 
 async def ask_date_from(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text
+    mode = context.user_data.get("date_mode", "range")
 
-    # Try range first: "nov/26 a jan/27"
+    if mode == "exact":
+        d = _parse_date(text)
+        if d is None:
+            await update.message.reply_text(
+                f"Não entendi. Tente: {_DATE_HINT_EXACT}", parse_mode="HTML"
+            )
+            return ASK_DATE_FROM
+        if d < date.today():
+            await update.message.reply_text("Essa data já passou. Tente uma data futura.")
+            return ASK_DATE_FROM
+        context.user_data["date_from"] = d
+        context.user_data["date_to"] = d
+        if context.user_data.get("trip_type") == "round-trip":
+            await _ask_date_mode(update.message, "retorno")
+            return ASK_DATE_MODE_RET
+        await _ask_stops(update.message)
+        return ASK_STOPS
+
+    # range mode
     rng = _parse_date_range(text)
     if rng:
         d_from, d_to = rng
@@ -631,21 +831,15 @@ async def ask_date_from(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         context.user_data["date_from"] = d_from
         context.user_data["date_to"] = d_to
         if context.user_data.get("trip_type") == "round-trip":
-            await update.message.reply_text(
-                f"Saída: <b>{d_from.strftime('%d/%m/%Y')} – {d_to.strftime('%d/%m/%Y')}</b>.\n\n"
-                f"Janela de datas de <b>retorno</b>?\n{_DATE_HINT}",
-                parse_mode="HTML",
-            )
-            return ASK_RETURN_FROM
+            await _ask_date_mode(update.message, "retorno")
+            return ASK_DATE_MODE_RET
         await _ask_stops(update.message)
         return ASK_STOPS
 
-    # Single date
     d = _parse_date(text)
     if d is None:
         await update.message.reply_text(
-            f"Não entendi. Tente: <i>nov/2026 a jan/2027</i> ou <i>nov/2026</i>",
-            parse_mode="HTML",
+            f"Não entendi. Tente: {_DATE_HINT_RANGE}", parse_mode="HTML"
         )
         return ASK_DATE_FROM
     if d < date.today():
@@ -653,8 +847,8 @@ async def ask_date_from(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return ASK_DATE_FROM
     context.user_data["date_from"] = d
     await update.message.reply_text(
-        f"Saída a partir de <b>{d.strftime('%d/%m/%Y')}</b>.\n\n"
-        f"Até qual data de saída?\n{_DATE_HINT_SINGLE}",
+        f"Partida a partir de <b>{d.strftime('%d/%m/%Y')}</b>.\n\n"
+        f"Até qual data?\n{_DATE_HINT_RANGE_END}",
         parse_mode="HTML",
     )
     return ASK_DATE_TO
@@ -664,7 +858,7 @@ async def ask_date_to(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     d = _parse_date(update.message.text)
     if d is None:
         await update.message.reply_text(
-            f"Não entendi. Tente: {_DATE_HINT_SINGLE}", parse_mode="HTML"
+            f"Não entendi. Tente: {_DATE_HINT_RANGE_END}", parse_mode="HTML"
         )
         return ASK_DATE_TO
     if d < context.user_data["date_from"]:
@@ -673,46 +867,75 @@ async def ask_date_to(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data["date_to"] = d
 
     if context.user_data.get("trip_type") == "round-trip":
-        await update.message.reply_text(
-            f"Janela de datas de <b>retorno</b>?\n{_DATE_HINT}",
-            parse_mode="HTML",
-        )
-        return ASK_RETURN_FROM
+        await _ask_date_mode(update.message, "retorno")
+        return ASK_DATE_MODE_RET
 
     await _ask_stops(update.message)
     return ASK_STOPS
 
 
+async def handle_date_mode_ret(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    mode = query.data.split(":")[-1]
+    context.user_data["return_date_mode"] = mode
+    if mode == "exact":
+        await query.edit_message_text(
+            f"Qual a data de <b>retorno</b>?\n{_DATE_HINT_EXACT}", parse_mode="HTML"
+        )
+    else:
+        await query.edit_message_text(
+            f"Período de <b>retorno</b>?\n{_DATE_HINT_RANGE}", parse_mode="HTML"
+        )
+    return ASK_RETURN_FROM
+
+
 async def ask_return_from(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text
+    mode = context.user_data.get("return_date_mode", "range")
+    min_date = context.user_data["date_to"]
 
-    # Try range first
+    if mode == "exact":
+        d = _parse_date(text)
+        if d is None:
+            await update.message.reply_text(
+                f"Não entendi. Tente: {_DATE_HINT_EXACT}", parse_mode="HTML"
+            )
+            return ASK_RETURN_FROM
+        if d < min_date:
+            await update.message.reply_text("O retorno deve ser depois da partida.")
+            return ASK_RETURN_FROM
+        context.user_data["return_date_from"] = d
+        context.user_data["return_date_to"] = d
+        await _ask_stops(update.message)
+        return ASK_STOPS
+
+    # range mode
     rng = _parse_date_range(text)
     if rng:
         d_from, d_to = rng
-        if d_from < context.user_data["date_to"]:
-            await update.message.reply_text("O retorno deve ser depois da data de saída.")
+        if d_from < min_date:
+            await update.message.reply_text("O retorno deve ser depois da partida.")
             return ASK_RETURN_FROM
         context.user_data["return_date_from"] = d_from
         context.user_data["return_date_to"] = d_to
         await _ask_stops(update.message)
         return ASK_STOPS
 
-    # Single date
+    # Single date — ask for end date
     d = _parse_date(text)
     if d is None:
         await update.message.reply_text(
-            f"Não entendi. Tente: <i>jan/2027 a fev/2027</i> ou <i>jan/2027</i>",
-            parse_mode="HTML",
+            f"Não entendi. Tente: {_DATE_HINT_RANGE}", parse_mode="HTML"
         )
         return ASK_RETURN_FROM
-    if d < context.user_data["date_to"]:
-        await update.message.reply_text("A data de retorno deve ser depois da data de saída.")
+    if d < min_date:
+        await update.message.reply_text("O retorno deve ser depois da partida.")
         return ASK_RETURN_FROM
     context.user_data["return_date_from"] = d
     await update.message.reply_text(
         f"Retorno a partir de <b>{d.strftime('%d/%m/%Y')}</b>.\n\n"
-        f"Até qual data de retorno?\n{_DATE_HINT_SINGLE}",
+        f"Até qual data?\n{_DATE_HINT_RANGE_END}",
         parse_mode="HTML",
     )
     return ASK_RETURN_TO
@@ -722,7 +945,7 @@ async def ask_return_to(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     d = _parse_date(update.message.text)
     if d is None:
         await update.message.reply_text(
-            f"Não entendi. Tente: {_DATE_HINT_SINGLE}", parse_mode="HTML"
+            f"Não entendi. Tente: {_DATE_HINT_RANGE_END}", parse_mode="HTML"
         )
         return ASK_RETURN_TO
     if d < context.user_data["return_date_from"]:
@@ -755,28 +978,34 @@ async def ask_stops(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     origin = context.user_data["origin"]
     dest = context.user_data["destination"]
+    origin_all = context.user_data.get("origin_all", [origin])
+    dest_all = context.user_data.get("dest_all", [dest])
     date_from: date = context.user_data["date_from"]
     date_to: date = context.user_data["date_to"]
     trip_type = context.user_data.get("trip_type", "one-way")
     stops_label = _STOPS_LABEL[stops]
 
+    origin_label = " + ".join(origin_all)
+    dest_label = " + ".join(dest_all)
     trip_label = "Ida e volta" if trip_type == "round-trip" else "Só ida"
     summary_lines = [
-        f"Buscando <b>{origin} → {dest}</b> | {trip_label}",
-        f"Saída: {date_from.strftime('%d/%m')}–{date_to.strftime('%d/%m/%Y')} | {stops_label}",
+        f"Buscando <b>{origin_label} → {dest_label}</b> | {trip_label}",
+        f"Partida: {date_from.strftime('%d/%m')}–{date_to.strftime('%d/%m/%Y')} | {stops_label}",
     ]
     if trip_type == "round-trip":
         rf = context.user_data.get("return_date_from")
         rt = context.user_data.get("return_date_to")
         if rf and rt:
-            summary_lines.append(f"Volta: {rf.strftime('%d/%m')}–{rt.strftime('%d/%m/%Y')}")
+            summary_lines.append(f"Retorno: {rf.strftime('%d/%m')}–{rt.strftime('%d/%m/%Y')}")
     summary_lines.append("\n⏳ Aguarde...")
 
     await query.edit_message_text("\n".join(summary_lines), parse_mode="HTML")
 
+    preview_origin = expand_country_to_airports(origin)[0]
+    preview_dest = expand_country_to_airports(dest)[0]
     route = Route(
-        origin=origin,
-        destination=dest,
+        origin=preview_origin,
+        destination=preview_dest,
         date_from=date_from,
         date_to=date_to,
         max_stops=stops,
@@ -787,15 +1016,19 @@ async def ask_stops(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         flights = []
 
     prices = [f.price for f in flights if f.price > 0]
+    preview_label = (
+        f"<i>({preview_origin}→{preview_dest})</i> "
+        if (preview_origin != origin or preview_dest != dest) else ""
+    )
     if prices:
         avg = sum(prices) / len(prices)
         low = min(prices)
         best = min(flights, key=lambda f: f.price)
         context.user_data["current_min"] = low
         price_info = (
-            f"💰 Preço médio ida: R$ {avg:,.0f}\n"
+            f"💰 Preço médio ida {preview_label}: R$ {avg:,.0f}\n"
             f"📉 Mínimo encontrado: R$ {low:,.0f} ({best.departure_date.strftime('%d/%m')})\n\n"
-            "Vou te avisar quando aparecer algo <b>abaixo desse mínimo</b>."
+            "Vou te avisar quando aparecer algo <b>abaixo do mínimo histórico</b>."
         )
     else:
         context.user_data["current_min"] = None
@@ -826,23 +1059,33 @@ async def confirm_subscription(update: Update, context: ContextTypes.DEFAULT_TYP
     if editing_id is not None:
         delete_subscription(editing_id)
 
-    sub = Subscription(
-        chat_id=str(query.from_user.id),
-        origin=context.user_data["origin"],
-        destination=context.user_data["destination"],
-        date_from=context.user_data["date_from"],
-        date_to=context.user_data["date_to"],
-        max_stops=context.user_data["max_stops"],
-        trip_type=context.user_data.get("trip_type", "one-way"),
-        return_date_from=context.user_data.get("return_date_from"),
-        return_date_to=context.user_data.get("return_date_to"),
-    )
-    save_subscription(sub)
+    origin_all = context.user_data.get("origin_all", [context.user_data["origin"]])
+    dest_all = context.user_data.get("dest_all", [context.user_data["destination"]])
 
+    count = 0
+    for orig in origin_all:
+        for dst in dest_all:
+            sub = Subscription(
+                chat_id=str(query.from_user.id),
+                origin=orig,
+                destination=dst,
+                date_from=context.user_data["date_from"],
+                date_to=context.user_data["date_to"],
+                max_stops=context.user_data["max_stops"],
+                trip_type=context.user_data.get("trip_type", "one-way"),
+                return_date_from=context.user_data.get("return_date_from"),
+                return_date_to=context.user_data.get("return_date_to"),
+            )
+            save_subscription(sub)
+            count += 1
+
+    origin_label = " + ".join(origin_all)
+    dest_label = " + ".join(dest_all)
     action = "atualizado" if editing_id else "criado"
+    rotas = f" ({count} rotas)" if count > 1 else ""
     await _send_menu(
         query,
-        f"✅ Alerta {action}! Vou monitorar <b>{sub.origin} → {sub.destination}</b> "
+        f"✅ Alerta {action}{rotas}! Vou monitorar <b>{origin_label} → {dest_label}</b> "
         f"e te avisar quando o preço estiver abaixo do mínimo histórico.",
     )
     return MENU
@@ -879,10 +1122,12 @@ def build_application(token: str) -> Application:
                 CallbackQueryHandler(ask_trip_type, pattern=r"^trip:"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_trip_type_text),
             ],
-            ASK_DATE_FROM: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date_from)],
-            ASK_DATE_TO:   [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date_to)],
-            ASK_RETURN_FROM:[MessageHandler(filters.TEXT & ~filters.COMMAND, ask_return_from)],
-            ASK_RETURN_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_return_to)],
+            ASK_DATE_MODE_DEP: [CallbackQueryHandler(handle_date_mode_dep, pattern=r"^datemode:partida:")],
+            ASK_DATE_FROM:     [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date_from)],
+            ASK_DATE_TO:       [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date_to)],
+            ASK_DATE_MODE_RET: [CallbackQueryHandler(handle_date_mode_ret, pattern=r"^datemode:retorno:")],
+            ASK_RETURN_FROM:   [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_return_from)],
+            ASK_RETURN_TO:     [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_return_to)],
             ASK_STOPS:     [CallbackQueryHandler(ask_stops, pattern=r"^stops:")],
             CONFIRM_SUB:   [CallbackQueryHandler(confirm_subscription, pattern=r"^confirm:")],
         },

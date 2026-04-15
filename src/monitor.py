@@ -4,7 +4,7 @@ import yaml
 from datetime import date
 from pathlib import Path
 
-from .models import Alert, Flight, PriceRecord, Route
+from .models import Alert, Flight, PriceRecord, Route, expand_country_to_airports
 from .db import get_price_stats, save_record, get_subscriptions
 from .sources import google_flights, kiwi, secret_flying
 
@@ -43,21 +43,32 @@ def load_routes() -> list[Route]:
 
 
 def _subscription_routes() -> list[Route]:
-    """Load active non-expired subscriptions as Route objects (one or two legs each)."""
+    """Load active non-expired subscriptions as Route objects.
+    Expands country codes to all airports in that country.
+    """
     today = date.today()
     routes: list[Route] = []
     for sub in get_subscriptions():
         if sub.date_to < today:
             continue
-        routes.append(Route(
-            origin=sub.origin,
-            destination=sub.destination,
-            date_from=max(sub.date_from, today),
-            date_to=sub.date_to,
-            max_stops=sub.max_stops,
-            currency=sub.currency,
-            chat_id=sub.chat_id,
-        ))
+
+        # Expand origin and destination (country -> airports)
+        origins = expand_country_to_airports(sub.origin)
+        destinations = expand_country_to_airports(sub.destination)
+
+        # Create route for each combination
+        for origin in origins:
+            for dest in destinations:
+                routes.append(Route(
+                    origin=origin,
+                    destination=dest,
+                    date_from=max(sub.date_from, today),
+                    date_to=sub.date_to,
+                    max_stops=sub.max_stops,
+                    currency=sub.currency,
+                    chat_id=sub.chat_id,
+                ))
+
         # Return leg for round-trip subscriptions
         if (
             sub.trip_type == "round-trip"
@@ -65,15 +76,18 @@ def _subscription_routes() -> list[Route]:
             and sub.return_date_to
             and sub.return_date_to >= today
         ):
-            routes.append(Route(
-                origin=sub.destination,
-                destination=sub.origin,
-                date_from=max(sub.return_date_from, today),
-                date_to=sub.return_date_to,
-                max_stops=sub.max_stops,
-                currency=sub.currency,
-                chat_id=sub.chat_id,
-            ))
+            # Reverse: destination airports -> origin airports
+            for orig in destinations:
+                for dst in origins:
+                    routes.append(Route(
+                        origin=orig,
+                        destination=dst,
+                        date_from=max(sub.return_date_from, today),
+                        date_to=sub.return_date_to,
+                        max_stops=sub.max_stops,
+                        currency=sub.currency,
+                        chat_id=sub.chat_id,
+                    ))
     return routes
 
 

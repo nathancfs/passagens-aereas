@@ -83,3 +83,53 @@ class Subscription(BaseModel):
     @property
     def route_key(self) -> str:
         return f"{self.origin}-{self.destination}"
+
+
+# Mapping of country codes to main airports (IATA codes)
+# Google Flights supports city codes (e.g., MIL = all Milan airports)
+AIRPORTS_BY_COUNTRY: dict[str, list[str]] = {
+    # South America
+    "BR": ["GRU", "GIG", "VCP", "CNF", "BSB", "POA", "CWB"],
+    "AR": ["EZE", "AEP", "COR"],
+    "UY": ["MVD"],
+    "CL": ["SCL"],
+    "CO": ["BOG", "MDE"],
+    "PE": ["LIM"],
+    # Europe
+    "IT": ["FCO", "MIL", "VCE", "NAP", "FLR", "BLQ"],
+    "ES": ["MAD", "BCN", "AGP", "SVQ", "VLC"],
+    "PT": ["LIS", "OPO", "FAO"],
+    "FR": ["CDG", "ORY", "NCE", "LYS", "MRS"],
+    "DE": ["FRA", "MUC", "BER", "DUS", "HAM"],
+    "UK": ["LHR", "LGW", "MAN", "EDI"],
+    "NL": ["AMS"],
+    "CH": ["ZRH", "GVA"],
+    "AT": ["VIE"],
+    "BE": ["BRU"],
+    "GR": ["ATH"],
+    # North America
+    "US": ["JFK", "LAX", "MIA", "ORD", "ATL", "SFO", "BOS"],
+    "CA": ["YYZ", "YVR", "YUL"],
+    "MX": ["MEX", "CUN"],
+    # Asia
+    "JP": ["NRT", "HND", "KIX"],
+    "CN": ["PEK", "PVG", "CAN", "HKG"],
+    "TH": ["BKK"],
+    "SG": ["SIN"],
+    "AE": ["DXB"],
+    # Oceania
+    "AU": ["SYD", "MEL", "BNE"],
+    "NZ": ["AKL"],
+}
+
+
+def is_country_code(code: str) -> bool:
+    """Check if a code is a country code (2 letters, uppercase)."""
+    return len(code) == 2 and code.isupper() and code in AIRPORTS_BY_COUNTRY
+
+
+def expand_country_to_airports(code: str) -> list[str]:
+    """Expand a country code to its main airports. Returns [code] if not a country."""
+    if is_country_code(code):
+        return AIRPORTS_BY_COUNTRY.get(code, [code])
+    return [code]  # Already an airport code

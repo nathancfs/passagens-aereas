@@ -5,7 +5,7 @@ import threading
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(os.environ.get("DOTENV_PATH", ".env"))
 
 import yaml
 from pathlib import Path
@@ -55,8 +55,7 @@ def main():
     t.start()
 
     print("[main] bot starting — send /start on Telegram")
-    # run_polling() is synchronous and manages its own event loop internally
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
