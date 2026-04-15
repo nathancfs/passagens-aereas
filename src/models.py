@@ -53,6 +53,12 @@ class Alert(BaseModel):
     deep_link: str
     source: str
     chat_id: str | None = None  # if set, send to this chat instead of env default
+    # Score fields (percentile-based)
+    score_label: str = ""       # "Mínima histórica 🔥", "Ótimo 🟢", "Bom 🟡"
+    score_pct: float = 0.0      # % of history records with higher price
+    hist_mean: float = 0.0
+    hist_min: float = 0.0
+    hist_count: int = 0
 
 
 class Subscription(BaseModel):

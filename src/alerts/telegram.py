@@ -28,11 +28,17 @@ def send(alert: Alert) -> None:
 
 
 def _format(alert: Alert) -> str:
-    drop_info = f" (-{alert.drop_pct}% vs mínimo anterior)" if alert.drop_pct > 0 else ""
+    label = alert.score_label or "Alerta de preço"
+    vs_mean = f"-{abs(alert.drop_pct):.0f}% vs média" if alert.drop_pct > 0 else ""
+    stats_line = (
+        f"📊 Mais barato que {alert.score_pct:.0f}% dos últimos registros\n"
+        f"   Média: R$ {alert.hist_mean:,.0f} | Mínima: R$ {alert.hist_min:,.0f} ({alert.hist_count} amostras)"
+    )
     return (
-        f"✈️ <b>Nova mínima: {alert.route_key}</b>\n"
+        f"✈️ <b>{alert.route_key}</b> | {label}\n"
         f"📅 Partida: {alert.departure_date.strftime('%d/%m/%Y')}\n"
-        f"💰 Preço: R$ {alert.new_price:,.0f}{drop_info}\n"
-        f"🔗 <a href=\"{alert.deep_link}\">Ver passagem</a>\n"
+        f"💰 <b>R$ {alert.new_price:,.0f}</b>{f'  {vs_mean}' if vs_mean else ''}\n"
+        f"{stats_line}\n"
+        f"🔗 <a href=\"{alert.deep_link}\">Buscar passagem</a>\n"
         f"<i>Fonte: {alert.source}</i>"
     )

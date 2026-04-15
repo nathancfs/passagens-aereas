@@ -26,13 +26,16 @@ def _alert_fn(alert):
         email.send(alert)
 
 
-def _scheduler_thread(interval_hours: int) -> None:
+def _scheduler_thread(interval_hours: int, lookback_days: int) -> None:
     """Runs the price monitor on a schedule in a background thread."""
-    run_once(alert_fn=_alert_fn)
+    run_once(alert_fn=_alert_fn, lookback_days=lookback_days)
 
     scheduler = BlockingScheduler()
-    scheduler.add_job(run_once, "interval", hours=interval_hours, kwargs={"alert_fn": _alert_fn})
-    print(f"[scheduler] running every {interval_hours}h")
+    scheduler.add_job(
+        run_once, "interval", hours=interval_hours,
+        kwargs={"alert_fn": _alert_fn, "lookback_days": lookback_days},
+    )
+    print(f"[scheduler] running every {interval_hours}h | lookback {lookback_days}d")
     scheduler.start()
 
 
@@ -41,12 +44,14 @@ def main():
 
     with open(CONFIG_PATH) as f:
         config = yaml.safe_load(f)
-    interval_hours = config.get("monitor", {}).get("interval_hours", 6)
+    monitor_cfg = config.get("monitor", {})
+    interval_hours = monitor_cfg.get("interval_hours", 1)
+    lookback_days = monitor_cfg.get("lookback_days", 60)
 
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     app = build_application(token)
 
-    t = threading.Thread(target=_scheduler_thread, args=(interval_hours,), daemon=True)
+    t = threading.Thread(target=_scheduler_thread, args=(interval_hours, lookback_days), daemon=True)
     t.start()
 
     print("[main] bot starting — send /start on Telegram")

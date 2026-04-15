@@ -1,7 +1,7 @@
 """SQLite price history, minimum tracking, and subscription management."""
 
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from .models import PriceRecord, Subscription
@@ -97,6 +97,30 @@ def get_historical_min(route_key: str, departure_date: date) -> float | None:
             (route_key, departure_date.isoformat()),
         ).fetchone()
     return row["min_price"] if row and row["min_price"] is not None else None
+
+
+def get_price_stats(route_key: str, departure_date: date, lookback_days: int = 60) -> dict | None:
+    """Returns price statistics over the lookback window, sorted ascending. None if no history."""
+    cutoff = (datetime.utcnow() - timedelta(days=lookback_days)).isoformat()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT price FROM price_records
+            WHERE route_key = ? AND departure_date = ? AND recorded_at >= ?
+            ORDER BY price ASC
+            """,
+            (route_key, departure_date.isoformat(), cutoff),
+        ).fetchall()
+    if not rows:
+        return None
+    prices = [r["price"] for r in rows]
+    return {
+        "min": prices[0],
+        "max": prices[-1],
+        "mean": sum(prices) / len(prices),
+        "count": len(prices),
+        "prices": prices,
+    }
 
 
 # ── Subscriptions ──────────────────────────────────────────────────────────────

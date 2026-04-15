@@ -1,14 +1,39 @@
-"""Core monitor: fetch → compare with historical min → alert."""
+"""Core monitor: fetch → score against history → alert."""
 
 import yaml
 from datetime import date
 from pathlib import Path
 
 from .models import Alert, Flight, PriceRecord, Route
-from .db import get_historical_min, save_record, get_subscriptions
+from .db import get_price_stats, save_record, get_subscriptions
 from .sources import google_flights, kiwi, secret_flying
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "routes.yaml"
+
+# Minimum number of historical records before scoring is meaningful
+_MIN_HISTORY = 3
+
+# Alert thresholds: price must be cheaper than this % of history
+_THRESHOLDS = {
+    "Mínima histórica 🔥": 90,
+    "Ótimo 🟢": 75,
+    "Bom 🟡": 60,
+}
+
+
+def _score_price(price: float, stats: dict) -> tuple[str, float] | None:
+    """
+    Returns (label, pct_above) if price qualifies for an alert, else None.
+    pct_above = % of historical prices strictly above current price.
+    """
+    if stats["count"] < _MIN_HISTORY:
+        return None
+    prices = stats["prices"]
+    pct_above = sum(1 for p in prices if p > price) / len(prices) * 100
+    for label, threshold in _THRESHOLDS.items():
+        if pct_above >= threshold:
+            return label, round(pct_above, 1)
+    return None
 
 
 def load_routes() -> list[Route]:
@@ -52,7 +77,7 @@ def _subscription_routes() -> list[Route]:
     return routes
 
 
-def run_once(alert_fn=None) -> list[Alert]:
+def run_once(alert_fn=None, lookback_days: int = 60) -> list[Alert]:
     """
     Runs one full monitoring cycle across static routes and bot subscriptions.
     alert_fn: optional callable(Alert) for sending notifications.
@@ -73,8 +98,7 @@ def run_once(alert_fn=None) -> list[Alert]:
             if flight.price <= 0:
                 continue
 
-            prev_min = get_historical_min(route_key, flight.departure_date)
-
+            # Save record first, then fetch stats (includes current price)
             record = PriceRecord(
                 route_key=route_key,
                 departure_date=flight.departure_date,
@@ -85,23 +109,32 @@ def run_once(alert_fn=None) -> list[Alert]:
             )
             save_record(record)
 
-            if prev_min is None:
-                print(f"[monitor] {route_key} {flight.departure_date}: first record R${flight.price:.0f}")
+            stats = get_price_stats(route_key, flight.departure_date, lookback_days)
+            if stats is None or stats["count"] < _MIN_HISTORY:
+                print(f"[monitor] {route_key} {flight.departure_date}: building history ({stats['count'] if stats else 1} records)")
                 continue
 
-            if flight.price <= prev_min:
-                drop_pct = round((1 - flight.price / prev_min) * 100, 1) if prev_min > 0 else 0
-                alert = Alert(
-                    route_key=route_key,
-                    departure_date=flight.departure_date,
-                    new_price=flight.price,
-                    previous_min=prev_min,
-                    drop_pct=drop_pct,
-                    deep_link=flight.deep_link,
-                    source=flight.source,
-                    chat_id=route.chat_id,
-                )
-                print(f"[monitor] ALERT {route_key} {flight.departure_date}: R${flight.price:.0f} (was R${prev_min:.0f}, -{drop_pct}%)")
+            scored = _score_price(flight.price, stats)
+            if scored is None:
+                continue
+
+            label, pct_above = scored
+            alert = Alert(
+                route_key=route_key,
+                departure_date=flight.departure_date,
+                new_price=flight.price,
+                previous_min=stats["min"],
+                drop_pct=round((1 - flight.price / stats["mean"]) * 100, 1),
+                deep_link=flight.deep_link,
+                source=flight.source,
+                chat_id=route.chat_id,
+                score_label=label,
+                score_pct=pct_above,
+                hist_mean=round(stats["mean"], 0),
+                hist_min=stats["min"],
+                hist_count=stats["count"],
+            )
+            print(f"[monitor] ALERT {route_key} {flight.departure_date}: R${flight.price:.0f} | {label} ({pct_above}% acima)")
                 triggered.append(alert)
                 if alert_fn:
                     alert_fn(alert)
