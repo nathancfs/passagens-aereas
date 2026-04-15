@@ -1,17 +1,17 @@
-"""SQLite price history and minimum tracking."""
+"""SQLite price history, minimum tracking, and subscription management."""
 
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-from .models import PriceRecord
+from .models import PriceRecord, Subscription
 
 DB_PATH = Path(__file__).parent.parent / "data" / "prices.db"
 
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -34,7 +34,36 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_route_date
             ON price_records (route_key, departure_date)
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id          TEXT NOT NULL,
+                origin           TEXT NOT NULL,
+                destination      TEXT NOT NULL,
+                date_from        TEXT NOT NULL,
+                date_to          TEXT NOT NULL,
+                max_stops        INTEGER NOT NULL DEFAULT 1,
+                currency         TEXT NOT NULL DEFAULT 'BRL',
+                trip_type        TEXT NOT NULL DEFAULT 'one-way',
+                return_date_from TEXT,
+                return_date_to   TEXT,
+                active           INTEGER NOT NULL DEFAULT 1,
+                created_at       TEXT NOT NULL
+            )
+        """)
+        # Migrate existing DBs that are missing the new columns
+        for col, definition in [
+            ("trip_type",        "TEXT NOT NULL DEFAULT 'one-way'"),
+            ("return_date_from", "TEXT"),
+            ("return_date_to",   "TEXT"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE subscriptions ADD COLUMN {col} {definition}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
+
+# ── Price records ──────────────────────────────────────────────────────────────
 
 def save_record(record: PriceRecord) -> None:
     with _connect() as conn:
@@ -70,15 +99,72 @@ def get_historical_min(route_key: str, departure_date: date) -> float | None:
     return row["min_price"] if row and row["min_price"] is not None else None
 
 
-def get_recent_records(route_key: str, limit: int = 50) -> list[dict]:
+# ── Subscriptions ──────────────────────────────────────────────────────────────
+
+def save_subscription(sub: Subscription) -> int:
     with _connect() as conn:
-        rows = conn.execute(
+        cursor = conn.execute(
             """
-            SELECT * FROM price_records
-            WHERE route_key = ?
-            ORDER BY recorded_at DESC
-            LIMIT ?
+            INSERT INTO subscriptions
+                (chat_id, origin, destination, date_from, date_to,
+                 max_stops, currency, trip_type, return_date_from, return_date_to,
+                 active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (route_key, limit),
+            (
+                sub.chat_id,
+                sub.origin,
+                sub.destination,
+                sub.date_from.isoformat(),
+                sub.date_to.isoformat(),
+                sub.max_stops,
+                sub.currency,
+                sub.trip_type,
+                sub.return_date_from.isoformat() if sub.return_date_from else None,
+                sub.return_date_to.isoformat() if sub.return_date_to else None,
+                int(sub.active),
+                sub.created_at.isoformat(),
+            ),
+        )
+        return cursor.lastrowid
+
+
+def get_subscriptions(chat_id: str | None = None, active_only: bool = True) -> list[Subscription]:
+    with _connect() as conn:
+        conditions: list[str] = []
+        params: list = []
+        if chat_id:
+            conditions.append("chat_id = ?")
+            params.append(chat_id)
+        if active_only:
+            conditions.append("active = 1")
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        rows = conn.execute(
+            f"SELECT * FROM subscriptions {where} ORDER BY created_at DESC",
+            params,
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [_row_to_subscription(r) for r in rows]
+
+
+def delete_subscription(sub_id: int) -> None:
+    """Soft delete."""
+    with _connect() as conn:
+        conn.execute("UPDATE subscriptions SET active = 0 WHERE id = ?", (sub_id,))
+
+
+def _row_to_subscription(row: sqlite3.Row) -> Subscription:
+    return Subscription(
+        id=row["id"],
+        chat_id=row["chat_id"],
+        origin=row["origin"],
+        destination=row["destination"],
+        date_from=date.fromisoformat(row["date_from"]),
+        date_to=date.fromisoformat(row["date_to"]),
+        max_stops=row["max_stops"],
+        currency=row["currency"],
+        trip_type=row["trip_type"],
+        return_date_from=date.fromisoformat(row["return_date_from"]) if row["return_date_from"] else None,
+        return_date_to=date.fromisoformat(row["return_date_to"]) if row["return_date_to"] else None,
+        active=bool(row["active"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )

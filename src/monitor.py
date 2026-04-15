@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 
 from .models import Alert, Flight, PriceRecord, Route
-from .db import get_historical_min, save_record
+from .db import get_historical_min, save_record, get_subscriptions
 from .sources import google_flights, kiwi, secret_flying
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "routes.yaml"
@@ -17,13 +17,47 @@ def load_routes() -> list[Route]:
     return [Route(**r) for r in config.get("routes", [])]
 
 
+def _subscription_routes() -> list[Route]:
+    """Load active non-expired subscriptions as Route objects (one or two legs each)."""
+    today = date.today()
+    routes: list[Route] = []
+    for sub in get_subscriptions():
+        if sub.date_to < today:
+            continue
+        routes.append(Route(
+            origin=sub.origin,
+            destination=sub.destination,
+            date_from=max(sub.date_from, today),
+            date_to=sub.date_to,
+            max_stops=sub.max_stops,
+            currency=sub.currency,
+            chat_id=sub.chat_id,
+        ))
+        # Return leg for round-trip subscriptions
+        if (
+            sub.trip_type == "round-trip"
+            and sub.return_date_from
+            and sub.return_date_to
+            and sub.return_date_to >= today
+        ):
+            routes.append(Route(
+                origin=sub.destination,
+                destination=sub.origin,
+                date_from=max(sub.return_date_from, today),
+                date_to=sub.return_date_to,
+                max_stops=sub.max_stops,
+                currency=sub.currency,
+                chat_id=sub.chat_id,
+            ))
+    return routes
+
+
 def run_once(alert_fn=None) -> list[Alert]:
     """
-    Runs one full monitoring cycle.
+    Runs one full monitoring cycle across static routes and bot subscriptions.
     alert_fn: optional callable(Alert) for sending notifications.
-    Returns list of alerts triggered.
     """
-    routes = load_routes()
+    routes = load_routes() + _subscription_routes()
     triggered: list[Alert] = []
 
     for route in routes:
@@ -51,7 +85,6 @@ def run_once(alert_fn=None) -> list[Alert]:
             )
             save_record(record)
 
-            # First record for this route+date — save but don't alert yet
             if prev_min is None:
                 print(f"[monitor] {route_key} {flight.departure_date}: first record R${flight.price:.0f}")
                 continue
@@ -66,6 +99,7 @@ def run_once(alert_fn=None) -> list[Alert]:
                     drop_pct=drop_pct,
                     deep_link=flight.deep_link,
                     source=flight.source,
+                    chat_id=route.chat_id,
                 )
                 print(f"[monitor] ALERT {route_key} {flight.departure_date}: R${flight.price:.0f} (was R${prev_min:.0f}, -{drop_pct}%)")
                 triggered.append(alert)
@@ -76,13 +110,12 @@ def run_once(alert_fn=None) -> list[Alert]:
 
 
 def _fetch_all(route: Route) -> list[Flight]:
-    """Fetches from all sources and deduplicates by (date, price)."""
+    """Fetches from all sources and keeps lowest price per departure date."""
     flights: list[Flight] = []
     flights.extend(google_flights.fetch(route))
     flights.extend(kiwi.fetch(route))
     flights.extend(secret_flying.fetch(route))
 
-    # Deduplicate: keep lowest price per departure date
     best: dict[date, Flight] = {}
     for f in flights:
         if f.price <= 0:

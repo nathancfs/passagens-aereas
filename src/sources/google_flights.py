@@ -69,7 +69,7 @@ def _fetch_date(route: Route, dep_date: date) -> list[Flight]:
                     airline=getattr(f, "name", "?"),
                     stops=getattr(f, "stops", -1),
                     duration_minutes=_parse_duration(getattr(f, "duration", "")),
-                    deep_link="https://www.google.com/travel/flights",
+                    deep_link=_build_deep_link(route.origin, route.destination, dep_date),
                     source="google_flights",
                 )
             )
@@ -77,6 +77,14 @@ def _fetch_date(route: Route, dep_date: date) -> list[Flight]:
             continue
 
     return flights
+
+
+def _build_deep_link(origin: str, destination: str, dep_date: date) -> str:
+    date_str = dep_date.strftime("%Y-%m-%d")
+    return (
+        f"https://www.google.com/travel/flights"
+        f"?q=Flights+from+{origin}+to+{destination}+on+{date_str}"
+    )
 
 
 def _parse_price(raw: str) -> float:

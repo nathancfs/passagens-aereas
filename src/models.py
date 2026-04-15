@@ -9,6 +9,7 @@ class Route(BaseModel):
     date_to: date
     max_stops: int = 1
     currency: str = "BRL"
+    chat_id: str | None = None  # set for subscription-based routes
 
 
 class Flight(BaseModel):
@@ -51,3 +52,28 @@ class Alert(BaseModel):
     drop_pct: float
     deep_link: str
     source: str
+    chat_id: str | None = None  # if set, send to this chat instead of env default
+
+
+class Subscription(BaseModel):
+    id: int | None = None
+    chat_id: str
+    origin: str
+    destination: str
+    date_from: date
+    date_to: date
+    max_stops: int = 1
+    currency: str = "BRL"
+    trip_type: str = "one-way"        # "one-way" or "round-trip"
+    return_date_from: date | None = None
+    return_date_to: date | None = None
+    active: bool = True
+    created_at: datetime = None
+
+    def model_post_init(self, __context):
+        if self.created_at is None:
+            self.created_at = datetime.utcnow()
+
+    @property
+    def route_key(self) -> str:
+        return f"{self.origin}-{self.destination}"

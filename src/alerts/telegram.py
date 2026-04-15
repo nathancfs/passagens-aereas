@@ -10,7 +10,8 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 
 def send(alert: Alert) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    # Use subscription-specific chat_id if available, fall back to env default
+    chat_id = alert.chat_id or os.environ["TELEGRAM_CHAT_ID"]
 
     text = _format(alert)
 
@@ -21,7 +22,7 @@ def send(alert: Alert) -> None:
             timeout=10,
         )
         resp.raise_for_status()
-        print(f"[telegram] alert sent for {alert.route_key} {alert.departure_date}")
+        print(f"[telegram] alert sent for {alert.route_key} {alert.departure_date} → chat {chat_id}")
     except Exception as exc:
         print(f"[telegram] send error: {exc}")
 
