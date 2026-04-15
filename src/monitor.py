@@ -135,7 +135,7 @@ def run_once(alert_fn=None, lookback_days: int = 60) -> list[Alert]:
                 hist_count=stats["count"],
             )
             print(f"[monitor] ALERT {route_key} {flight.departure_date}: R${flight.price:.0f} | {label} ({pct_above}% acima)")
-                triggered.append(alert)
+            triggered.append(alert)
                 if alert_fn:
                     alert_fn(alert)
 
